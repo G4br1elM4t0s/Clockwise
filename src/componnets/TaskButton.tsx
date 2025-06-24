@@ -13,7 +13,7 @@ interface TaskButtonProps {
   onDragAction?: (taskId: string, action: "start" | "pause") => void
 }
 
-export function TaskButton({ task, index, onDragAction }: TaskButtonProps) {
+export function TaskButton({ task, onDragAction }: TaskButtonProps) {
   // Detectar se é uma tarefa com sessão Pomodoro ativa
   const taskWithSession = task as TaskWithActiveSession
   const activeSession = taskWithSession.active_session
@@ -31,7 +31,7 @@ export function TaskButton({ task, index, onDragAction }: TaskButtonProps) {
   const [isSwapped, setIsSwapped] = useState(
     task.status === "in_progress" || task.status === "waiting"
   )
-  const [wasActivated, setWasActivated] = useState(false)
+  const [wasActivated] = useState(false)
   const [isPaused, setIsPaused] = useState(task.status === "paused")
   const [currentTimeRemaining, setCurrentTimeRemaining] = useState(() => {
     const initialTime = calculateTimeRemaining(task)
@@ -59,7 +59,7 @@ export function TaskButton({ task, index, onDragAction }: TaskButtonProps) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
 
-  const { completeTask, getTaskRemainingTime } = useTaskStore()
+  const { getTaskRemainingTime } = useTaskStore()
 
   const timeRemaining = currentTimeRemaining
 

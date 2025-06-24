@@ -3,7 +3,7 @@ import { useState, useEffect } from "react"
 import { useTaskStore } from "../store/task.store"
 import type { Task } from "../store/task.store"
 import { invoke } from "@tauri-apps/api/core"
-import { Check, X, Trash2, Play, Pause, Square } from "lucide-react"
+import { X, Trash2, Play, Pause, Square } from "lucide-react"
 import TimeInput from "./TimeInput"
 import DateInput from "./DateInput"
 
@@ -15,7 +15,7 @@ interface TaskEditModalProps {
 }
 
 export function TaskEditModal({ isOpen, onClose, anchorEl, task }: TaskEditModalProps) {
-  const { deleteTask, completeTask, pauseTask, resumeTask } = useTaskStore()
+  const { deleteTask, completeTask, pauseTask } = useTaskStore()
   const [taskName, setTaskName] = useState(task.name)
   const [timeInput, setTimeInput] = useState(() => {
     const hours = Math.floor(task.estimated_hours || 0)
