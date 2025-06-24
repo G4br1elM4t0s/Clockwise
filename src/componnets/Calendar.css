@@ -1,0 +1,129 @@
+.custom-calendar {
+  --calendar-green: #17ff8b;
+  --calendar-dark: #444444;
+  --calendar-gray: #7f7f7f;
+  background-color: var(--calendar-dark);
+  padding: 1rem;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.custom-calendar-picker {
+  --rdp-accent-color: var(--calendar-green);
+  --rdp-background-color: var(--calendar-dark);
+  width: 100%;
+}
+
+.custom-calendar .rdp {
+  width: 100%;
+}
+
+.custom-calendar .rdp-months {
+  width: 100%;
+}
+
+.custom-calendar .rdp-month {
+  width: 100%;
+}
+
+/* Hover effect on days */
+.custom-calendar .rdp-button:hover:not([disabled]):not(.custom-selected) {
+  background-color: rgba(23, 255, 139, 0.2);
+}
+
+/* Selected day */
+.custom-calendar .custom-selected {
+  background-color: rgba(23, 255, 139, 0.2) !important;
+  color: var(--calendar-green);
+  font-weight: bold;
+  border-radius: 9999px;
+}
+
+/* Regular day buttons */
+.custom-calendar .rdp-button {
+  color: white;
+  border-radius: 9999px;
+  aspect-ratio: 1;
+  height: 28px;
+  width: 28px;
+  margin: 0 2px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Today's date */
+.custom-calendar .custom-today {
+  color: var(--calendar-green);
+  font-weight: bold;
+}
+
+/* Days with tasks */
+.custom-calendar .has-task {
+  position: relative;
+}
+
+.custom-calendar .has-task::before {
+  content: "•";
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--calendar-green);
+}
+
+/* Selected day with task */
+.custom-calendar .has-task.custom-selected::before {
+  color: var(--calendar-green);
+}
+
+/* Today with task */
+.custom-calendar .has-task.custom-today::before {
+  bottom: 0;
+}
+
+/* Week day names */
+.custom-calendar .rdp-head_cell {
+  color: var(--calendar-green);
+  font-weight: 600;
+  height: 28px;
+  padding: 0;
+}
+
+/* Navigation buttons */
+.custom-calendar .rdp-nav_button {
+  color: var(--calendar-green);
+  height: 28px;
+}
+
+.custom-calendar .rdp-nav_button:hover {
+  background-color: rgba(23, 255, 139, 0.2);
+}
+
+/* Month and year label */
+.custom-calendar .rdp-caption_label {
+  color: white;
+  font-weight: 600;
+  font-size: 1.2em;
+  height: 28px;
+  line-height: 28px;
+}
+
+/* Days outside current month */
+.custom-calendar .rdp-day_outside {
+  color: var(--calendar-gray);
+  opacity: 0.4;
+}
+
+/* Disabled days */
+.custom-calendar .rdp-day_disabled {
+  color: var(--calendar-gray);
+  opacity: 0.4;
+}
+
+.custom-calendar .rdp-table {
+  width: 100%;
+}

@@ -142,6 +142,16 @@ body {
   animation: modalFadeIn 0.2s ease-out forwards;
 }
 
+/* Task Modal Custom Styles */
+.task-modal {
+  padding: 20px !important;
+}
+
+/* Estilo para as labels do formulário */
+.task-modal label {
+  @apply text-white/70 text-sm uppercase select-none;
+}
+
 /* Enhanced form inputs */
 .form-input {
   transition: all 0.2s ease;

@@ -1,282 +1,238 @@
 import { useTaskStore } from "../store/task.store"
-import type { Task as StoreTask } from "../store/task.store"
-import { useState, useEffect } from "react"
-import {
-  Settings,
-  Calendar,
-  Clock,
-  Battery,
-  Plus,
-  BatteryLow,
-  BatteryFull,
-  Play,
-  Pause
-} from "lucide-react"
-import { VolumeSlider } from "./VolumeSlider"
-
-interface TimeRemaining {
-  hours: number
-  minutes: number
-  seconds: number
-  isNegative: boolean
-}
+import { useState, useEffect, useMemo } from "react"
+import type { RefObject } from "react"
+import { Calendar as CalendarIcon, Clock, Plus, List } from "lucide-react"
+// import { VolumeSlider } from "./VolumeSlider"
+import { TaskButton } from "./TaskButton"
+import Calendar from "./Calendar"
+import { TaskList } from "./TaskList"
+import { TaskListView } from "./TaskListView"
+import { invoke } from "@tauri-apps/api/core"
 
 interface TaskFooterProps {
   onAddClick: () => void
+  buttonRef: RefObject<HTMLButtonElement | null>
 }
 
-export function TaskFooter({ onAddClick }: TaskFooterProps) {
-  const { getTodayTasks, startTask, pauseTask } = useTaskStore()
+export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
+  const {
+    getTodayActiveTasks,
+    getTodayActiveTasksWithSessions,
+    tasks,
+    tasksWithSessions,
+    loadTasks,
+    loadTasksWithSessions
+  } = useTaskStore()
   const [currentTime, setCurrentTime] = useState(new Date())
-  const [batteryLevel, setBatteryLevel] = useState<number | null>(null)
-  const [isCharging, setIsCharging] = useState(false)
-  const [isLaptop, setIsLaptop] = useState(false)
-  const [elapsedTimes, setElapsedTimes] = useState<{ [key: string]: number }>({})
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [isTaskListViewOpen, setIsTaskListViewOpen] = useState(false)
 
-  // Get today's tasks
-  const tasks = getTodayTasks()
-  console.log("Tasks from getTodayTasks:", tasks)
+  // Get today's tasks - usar dados com sessões quando disponível, excluindo concluídas
+  const todayTasks = useMemo(() => {
+    const todayTasksWithSessions = getTodayActiveTasksWithSessions()
+    return todayTasksWithSessions.length > 0 ? todayTasksWithSessions : getTodayActiveTasks()
+  }, [tasksWithSessions, tasks])
 
-  // Find active task
-  const activeTask = tasks.find(task => task.status === "in_progress")
-  console.log("Active task:", activeTask)
+  // Estado local para a ordem das tarefas (para drag and drop)
+  const [orderedTasks, setOrderedTasks] = useState(todayTasks)
 
-  // Update time and timers every second
+  // Atualizar ordem das tarefas quando todayTasks mudar
+  useEffect(() => {
+    setOrderedTasks(todayTasks)
+  }, [todayTasks])
+
+  const allTasks = useMemo(() => {
+    return tasksWithSessions.length > 0 ? tasksWithSessions : tasks
+  }, [tasksWithSessions, tasks])
+
+  const datesWithTasks = useMemo(() => {
+    return allTasks.map(task => {
+      const [year, month, day] = task.scheduled_date.split("-").map(Number)
+      return new Date(year, month - 1, day) // month é 0-indexed
+    })
+  }, [allTasks])
+
+  // Pegar tarefas do dia selecionado
+  const getTasksForDate = useMemo(() => {
+    return (date: Date) => {
+      const dateStr = date.toISOString().split("T")[0]
+      return allTasks.filter(task => task.scheduled_date === dateStr)
+    }
+  }, [allTasks])
+
+  // Update time every second
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date())
-
-      // Update elapsed time for active task
-      if (activeTask?.started_at) {
-        setElapsedTimes(prev => {
-          const startTime = new Date(activeTask.started_at!).getTime()
-          const elapsed = Math.floor((Date.now() - startTime) / 1000)
-          return { ...prev, [activeTask.id!]: elapsed }
-        })
-      }
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [activeTask])
-
-  // Detect if laptop and get battery info
-  useEffect(() => {
-    const checkBattery = async () => {
-      try {
-        if ("getBattery" in navigator) {
-          const battery = await (navigator as any).getBattery()
-          setIsLaptop(true)
-          setBatteryLevel(Math.round(battery.level * 100))
-          setIsCharging(battery.charging)
-
-          battery.addEventListener("levelchange", () => {
-            setBatteryLevel(Math.round(battery.level * 100))
-          })
-          battery.addEventListener("chargingchange", () => {
-            setIsCharging(battery.charging)
-          })
-        } else {
-          setIsLaptop(false)
-        }
-      } catch (error) {
-        console.error("Error checking battery:", error)
-        setIsLaptop(false)
-      }
-    }
-
-    checkBattery()
   }, [])
 
-  const getBatteryIcon = () => {
-    if (batteryLevel === null) return null
-    if (batteryLevel <= 20) return <BatteryLow className="w-4 h-4 text-red-500" />
-    if (batteryLevel >= 90) return <BatteryFull className="w-4 h-4 text-green-500" />
-    return <Battery className="w-4 h-4 text-blue-500" />
-  }
+  // Reload automático removido - só recarrega quando necessário
 
-  const calculateTimeRemaining = (task: StoreTask): TimeRemaining => {
-    const totalSeconds = task.estimated_hours * 3600
+  const handleDaySelect = (date: Date | undefined) => {
+    if (date) {
+      const dateStr = date.toISOString().split("T")[0]
+      const tasksForDate = allTasks.filter(task => task.scheduled_date === dateStr)
 
-    if (task.status !== "in_progress" || !task.started_at) {
-      return {
-        hours: Math.floor(totalSeconds / 3600),
-        minutes: Math.floor((totalSeconds % 3600) / 60),
-        seconds: totalSeconds % 60,
-        isNegative: false
+      if (tasksForDate.length > 0) {
+        setSelectedDate(date)
+      } else {
+        setSelectedDate(null)
+        setCurrentTime(date)
+        setIsCalendarOpen(false)
       }
     }
+  }
 
-    const elapsedSeconds = elapsedTimes[task.id!] || 0
-    const remainingSeconds = totalSeconds - elapsedSeconds
-
-    if (remainingSeconds >= 0) {
-      return {
-        hours: Math.floor(remainingSeconds / 3600),
-        minutes: Math.floor((remainingSeconds % 3600) / 60),
-        seconds: remainingSeconds % 60,
-        isNegative: false
-      }
+  const toggleCalendar = async () => {
+    if (!isCalendarOpen) {
+      await invoke("expand_window_for_modal")
     } else {
-      const overSeconds = Math.abs(remainingSeconds)
-      return {
-        hours: Math.floor(overSeconds / 3600),
-        minutes: Math.floor((overSeconds % 3600) / 60),
-        seconds: overSeconds % 60,
-        isNegative: true
+      await invoke("reset_window_size")
+    }
+    setIsCalendarOpen(!isCalendarOpen)
+    setSelectedDate(null)
+  }
+
+  // Fechar o calendário quando clicar fora
+  useEffect(() => {
+    const handleClickOutside = async (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      const isClickInside =
+        target.closest(".calendar-container") || target.closest(".calendar-trigger")
+      const isClickOnInput =
+        target.tagName.toLowerCase() === "input" || target.tagName.toLowerCase() === "button"
+
+      if (!isClickInside && !isClickOnInput) {
+        setIsCalendarOpen(false)
+        setSelectedDate(null)
       }
     }
-  }
 
-  const handleStartTask = async (taskId: string) => {
-    try {
-      if (activeTask && activeTask.id !== taskId) {
-        alert("Você já tem uma tarefa em andamento. Pause-a primeiro.")
-        return
-      }
-
-      await startTask(taskId)
-      setElapsedTimes(prev => ({
-        ...prev,
-        [taskId]: 0
-      }))
-    } catch (error) {
-      console.error("Error starting task:", error)
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
     }
-  }
+  }, [])
 
-  const handlePauseTask = async (taskId: string) => {
-    try {
-      await pauseTask(taskId)
-      setElapsedTimes(prev => {
-        const newTimes = { ...prev }
-        delete newTimes[taskId]
-        return newTimes
-      })
-    } catch (error) {
-      console.error("Error pausing task:", error)
+  // Observar mudanças no estado do calendário para controlar o resize
+  useEffect(() => {
+    if (!isCalendarOpen) {
+      invoke("reset_window_size")
     }
-  }
+  }, [isCalendarOpen])
 
-  const formatTimeDisplay = (time: TimeRemaining) => {
-    const sign = time.isNegative ? "-" : ""
-    const hours = Math.floor(time.hours).toString().padStart(2, "0")
-    const minutes = time.minutes.toString().padStart(2, "0")
-    return `${sign}${hours}:${minutes}`
+  // Função para recarregar dados das tarefas
+  const handleTaskAction = async (taskId: string, action: "start" | "pause") => {
+    console.log(`🔄 TaskFooter - Recarregando dados após ação ${action} na tarefa ${taskId}`)
+    try {
+      // Recarregar dados do backend
+      await Promise.all([loadTasks(), loadTasksWithSessions()])
+      console.log("✅ TaskFooter - Dados recarregados com sucesso")
+    } catch (error) {
+      console.error("❌ TaskFooter - Erro ao recarregar dados:", error)
+    }
   }
 
   return (
-    <div className="w-full bg-black text-white">
+    <div style={{ padding: "0px 16px" }} className="w-full bg-black text-white ">
       <div className="h-[55px] flex items-center justify-between px-4 backdrop-blur-sm border-t border-[#7F7F7F]">
         {/* Tasks Section */}
         <div className="flex items-center gap-3 flex-1 overflow-hidden">
           <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-            {tasks.length === 0 ? (
+            {orderedTasks.length === 0 ? (
               <div className="text-gray-400">Nenhuma tarefa para hoje</div>
             ) : (
-              tasks.map(task => {
-                const timeRemaining = calculateTimeRemaining(task)
-                const isTaskActive = task.status === "in_progress"
-                const canStart = !activeTask || activeTask.id === task.id
-
-                return (
-                  <div
-                    key={task.id}
-                    className={`bg-[#7F7F7F] hover:bg-[#7F7F7F]/80 rounded-lg px-3 py-2 flex items-center gap-3 whitespace-nowrap flex-shrink-0 min-w-[200px] transition-colors ${
-                      isTaskActive ? "ring-2 ring-[#17FF8B]/50" : ""
-                    }`}
-                  >
-                    {/* Play/Pause Button */}
-                    <button
-                      onClick={() =>
-                        isTaskActive ? handlePauseTask(task.id!) : handleStartTask(task.id!)
-                      }
-                      disabled={!canStart && !isTaskActive}
-                      className={`rounded-full p-1.5 transition-colors flex-shrink-0 ${
-                        isTaskActive
-                          ? "bg-[#7F7F7F] hover:bg-[#7F7F7F]/80"
-                          : canStart
-                          ? "bg-[#17FF8B] hover:bg-[#17FF8B]/80"
-                          : "bg-gray-500 cursor-not-allowed"
-                      }`}
-                      title={
-                        !canStart && !isTaskActive
-                          ? "Pause a tarefa atual primeiro"
-                          : isTaskActive
-                          ? "Pausar tarefa"
-                          : "Iniciar tarefa"
-                      }
-                    >
-                      {isTaskActive ? (
-                        <Pause className="w-3 h-3 text-white" />
-                      ) : (
-                        <Play className="w-3 h-3 text-white" />
-                      )}
-                    </button>
-
-                    <div className="flex flex-col flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{task.name}</span>
-                        <button className="opacity-50 hover:opacity-100 transition-opacity">
-                          <Settings className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <span>{task.user}</span>
-                        <span>•</span>
-                        <span
-                          className={`font-mono font-bold ${
-                            timeRemaining.isNegative ? "text-red-400" : "text-[#17FF8B]"
-                          }`}
-                        >
-                          {formatTimeDisplay(timeRemaining)}
-                        </span>
-                        {isTaskActive && (
-                          <span className="bg-[#17FF8B] w-2 h-2 rounded-full animate-pulse"></span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })
+              orderedTasks.map((task, index) => (
+                <TaskButton
+                  key={task.id}
+                  task={task}
+                  index={index}
+                  onDragAction={handleTaskAction}
+                />
+              ))
             )}
           </div>
         </div>
 
         {/* System Section with Add Button */}
         <div className="flex items-center gap-4 flex-shrink-0">
+          {/* Task List View Button */}
+          <button
+            onClick={async () => {
+              await invoke("expand_window_for_modal")
+              setIsTaskListViewOpen(true)
+            }}
+            className="flex items-center cursor-pointer border border-white rounded-full gap-2 text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors p-2"
+            title="Ver todas as tarefas"
+          >
+            <List className="w-4 h-4" />
+          </button>
+
           {/* Add Button */}
           <button
+            ref={buttonRef}
             onClick={onAddClick}
-            className="bg-[#17FF8B] hover:bg-[#17FF8B]/80 rounded-full p-2 transition-colors flex-shrink-0"
+            className="flex items-center cursor-pointer border border-white rounded-full gap-2 text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors p-2"
             title="Adicionar nova tarefa"
           >
-            <Plus className="w-4 h-4 text-black" />
+            <Plus className="w-4 h-4" />
           </button>
 
           {/* Volume Control with Slider */}
-          <VolumeSlider />
-
-          {/* Battery (laptop only) */}
-          {isLaptop && batteryLevel !== null && (
-            <div className="flex items-center gap-2">
-              {getBatteryIcon()}
-              <span className="text-xs text-gray-300">
-                {batteryLevel}%{isCharging && " ⚡"}
-              </span>
-            </div>
-          )}
+          {/* <VolumeSlider /> */}
 
           {/* Date and Time */}
           <div className="flex items-center gap-3 text-sm">
-            <div className="flex items-center gap-1">
-              <Calendar className="w-4 h-4 text-[#17FF8B]" />
-              <span>
-                {currentTime.toLocaleDateString("pt-BR", {
-                  day: "2-digit",
-                  month: "2-digit"
-                })}
-              </span>
+            <div className="relative">
+              <div
+                className="flex items-center gap-1 cursor-pointer calendar-trigger"
+                onClick={toggleCalendar}
+              >
+                <CalendarIcon className="w-4 h-4 text-[#17FF8B]" />
+                <span>
+                  {currentTime.toLocaleDateString("pt-BR", {
+                    day: "2-digit",
+                    month: "2-digit"
+                  })}
+                </span>
+              </div>
+
+              {isCalendarOpen && (
+                <div
+                  className="absolute right-[calc(100%-80px)] top-[calc(100%+8px)] z-50 calendar-container"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {selectedDate ? (
+                    <TaskList
+                      tasks={getTasksForDate(selectedDate)}
+                      date={selectedDate}
+                      onBack={() => setSelectedDate(null)}
+                      onClose={() => {
+                        setIsCalendarOpen(false)
+                        setSelectedDate(null)
+                      }}
+                    />
+                  ) : (
+                    <Calendar
+                      selected={currentTime}
+                      onSelect={handleDaySelect}
+                      highlightedDates={datesWithTasks}
+                      onUnmount={
+                        !isCalendarOpen
+                          ? () => {
+                              setIsCalendarOpen(false)
+                              setSelectedDate(null)
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-1">
@@ -292,6 +248,15 @@ export function TaskFooter({ onAddClick }: TaskFooterProps) {
           </div>
         </div>
       </div>
+
+      {/* Task List View Modal */}
+      <TaskListView
+        isOpen={isTaskListViewOpen}
+        onClose={async () => {
+          setIsTaskListViewOpen(false)
+          await invoke("reset_window_size")
+        }}
+      />
     </div>
   )
 }
