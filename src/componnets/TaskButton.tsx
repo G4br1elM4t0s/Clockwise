@@ -383,10 +383,14 @@ export function TaskButton({ task, onDragAction }: TaskButtonProps) {
       if (task.status === "waiting") {
         return "bg-yellow-500 animate-pulse" // Amarelo para pausas Pomodoro
       }
-      return "bg-[#17FF8B] animate-pulse" // Verde para trabalho
+      // Se estiver atrasado, mostra em vermelho
+      if (timeRemaining.isNegative) {
+        return "bg-[#FF396D] animate-pulse" // Vermelho para atrasado
+      }
+      return "bg-[#17FF8B] animate-pulse" // Verde para trabalho em dia
     }
     if (task.status === "paused" || isPaused) {
-      return "bg-[#FF396D] animate-pulse" // Vermelho para pausado manualmente
+      return "bg-white animate-pulse" // Branco para pausado manualmente
     }
     return "bg-[#7F7F7F] hover:bg-[#17FF8B] hover:animate-pulse"
   }
@@ -403,11 +407,12 @@ export function TaskButton({ task, onDragAction }: TaskButtonProps) {
   return (
     <>
       <div
-        className={`flex select-none items-stretch w-60 gap-2 h-10 bg-[#444444] rounded-full text-white hover:bg-[#252525] transition-all`}
+        className={`flex select-none items-stretch w-56 gap-2 h-8 bg-[#444444] rounded-full text-white hover:bg-[#252525] transition-all`}
       >
         <button
           ref={settingsButtonRef}
-          className="w-[15%] flex items-center justify-end pr-1 hover:bg-zinc-600 rounded-l-full transition-colors"
+          className="w-[15%] cursor-pointer flex items-center justify-center hover:bg-zinc-600 rounded-l-full transition-colors"
+
           onClick={handleSettingsClick}
         >
           <SettingsIcon className="w-4 h-4 text-white" />
@@ -420,12 +425,12 @@ export function TaskButton({ task, onDragAction }: TaskButtonProps) {
         >
           <div className="flex flex-col justify-center w-[47%]">
             <span
-              className={`font-medium text-base truncate max-w-full ${
+              className={`font-medium text-xs truncate max-w-full ${
                 isSwapped || shouldSwapElements ? "text-center" : ""
               }`}
               title={task.name}
             >
-              {truncateText(task.name, 10)}
+              {truncateText(task.name, 16)}
             </span>
           </div>
 
@@ -466,13 +471,13 @@ export function TaskButton({ task, onDragAction }: TaskButtonProps) {
                     ? activeSession?.session_type === "break"
                       ? "PAUSA"
                       : "BREAK"
-                    : "ANDAMENTO"}
+                    : timeRemaining.isNegative ? "ATRASADO" : "ANDAMENTO"}
                 </span>
               )}
               <span
                 className={`font-mono font-bold ${
                   task.status === "in_progress" || task.status === "waiting" ? "text-[10px]" : ""
-                }`}
+                } ${task.status === "paused" ? "text-[#FF396D]" : ""}`}
               >
                 {task.status === "paused" ? "PAUSADO" : formatTimeDisplay(timeRemaining)}
               </span>

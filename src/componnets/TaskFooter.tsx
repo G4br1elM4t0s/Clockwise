@@ -1,13 +1,15 @@
 import { useTaskStore } from "../store/task.store"
 import { useState, useEffect, useMemo } from "react"
 import type { RefObject } from "react"
-import { Calendar as CalendarIcon, Clock, Plus, List } from "lucide-react"
+import { Clock, Plus, List } from "lucide-react"
 // import { VolumeSlider } from "./VolumeSlider"
 import { TaskButton } from "./TaskButton"
 import Calendar from "./Calendar"
 import { TaskList } from "./TaskList"
 import { TaskListView } from "./TaskListView"
 import { invoke } from "@tauri-apps/api/core"
+import { CalendarIcon } from "../components/CalendarIcon"
+import { CalendarStartIcon } from "../components/CalendarStartIcon"
 
 interface TaskFooterProps {
   onAddClick: () => void
@@ -146,14 +148,21 @@ export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
             {orderedTasks.length === 0 ? (
               <div className="text-gray-400">Nenhuma tarefa para hoje</div>
             ) : (
-              orderedTasks.map((task, index) => (
-                <TaskButton
-                  key={task.id}
-                  task={task}
-                  index={index}
-                  onDragAction={handleTaskAction}
-                />
-              ))
+              <>
+                {orderedTasks.slice(0, 5).map((task, index) => (
+                  <TaskButton
+                    key={task.id}
+                    task={task}
+                    index={index}
+                    onDragAction={handleTaskAction}
+                  />
+                ))}
+                {orderedTasks.length > 5 && (
+                  <div className="flex items-center justify-center min-w-[60px] text-white rounded-lg text-xl font-bold ">
+                    +{orderedTasks.length - 5}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -186,17 +195,25 @@ export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
           {/* <VolumeSlider /> */}
 
           {/* Date and Time */}
-          <div className="flex items-center gap-3 text-sm">
+          <div style={{ padding: "0px 10px" }} className="flex items-center justify-center bg-[#444444] rounded-full h-8 gap-3 text-sm">
             <div className="relative">
               <div
                 className="flex items-center gap-1 cursor-pointer calendar-trigger"
                 onClick={toggleCalendar}
               >
-                <CalendarIcon className="w-4 h-4 text-[#17FF8B]" />
+                <div className="relative w-6 h-6">
+                  <div className={`absolute inset-0 transition-all duration-500 ${isCalendarOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
+                    <CalendarStartIcon className="w-6 h-6 text-[#17FF8B]" />
+                  </div>
+                  <div className={`absolute inset-0 transition-all duration-500 ${!isCalendarOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
+                    <CalendarIcon className="w-6 h-6 text-white" />
+                  </div>
+                </div>
                 <span>
                   {currentTime.toLocaleDateString("pt-BR", {
                     day: "2-digit",
-                    month: "2-digit"
+                    month: "2-digit",
+                    year: "numeric"
                   })}
                 </span>
               </div>
@@ -234,14 +251,12 @@ export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
                 </div>
               )}
             </div>
-
+            <span className="border-x border-[#7F7F7F] h-6 "></span>
             <div className="flex items-center gap-1">
-              <Clock className="w-4 h-4 text-[#17FF8B]" />
-              <span className="font-mono">
-                {currentTime.toLocaleTimeString("pt-BR", {
+              <span className="font-medium text-xs">
+                {currentTime.toLocaleDateString("pt-BR", { weekday: "short" }).toUpperCase()} {currentTime.toLocaleTimeString("pt-BR", {
                   hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit"
+                  minute: "2-digit"
                 })}
               </span>
             </div>

@@ -10,6 +10,12 @@ use rusqlite::{Connection, Result as SqliteResult, OptionalExtension};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+#[cfg(windows)]
+use windows::{
+    Win32::Foundation::*,
+    Win32::UI::WindowsAndMessaging::*,
+};
+
 // Estado compartilhado para controlar se está colapsado
 static COLLAPSED_STATE: Mutex<bool> = Mutex::new(false);
 // Último tempo que o atalho foi executado (para debounce)
@@ -1130,7 +1136,7 @@ async fn get_today_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>
 async fn expand_window_for_modal(window: tauri::WebviewWindow) -> Result<(), String> {
     println!("🔧 Expandindo janela para modal...");
 
-    match window.set_size(PhysicalSize::new(1920, 500)) {
+    match window.set_size(PhysicalSize::new(1920, 700)) {
         Ok(_) => {
             println!("✓ Janela expandida para 500px");
 
@@ -1169,7 +1175,7 @@ async fn expand_window_for_modal(window: tauri::WebviewWindow) -> Result<(), Str
 async fn reset_window_size(window: tauri::WebviewWindow) -> Result<(), String> {
     println!("🔧 Resetando tamanho da janela...");
 
-    match window.set_size(PhysicalSize::new(1920, 55)) {
+    match window.set_size(PhysicalSize::new(1920, 70)) {
         Ok(_) => {
             println!("✓ Janela resetada para 55px");
 
@@ -1199,6 +1205,48 @@ async fn reset_window_size(window: tauri::WebviewWindow) -> Result<(), String> {
             println!("✗ Erro ao resetar janela: {}", e);
             Err(e.to_string())
         }
+    }
+}
+
+#[cfg(windows)]
+fn remove_window_decorations(window: tauri::WebviewWindow) {
+    // Aguarda um momento para garantir que a janela foi criada
+    thread::sleep(Duration::from_millis(100));
+
+    // Obtém o HWND da janela - convertendo o ponteiro para isize
+    let hwnd = HWND(window.hwnd().unwrap().0 as isize);
+
+    unsafe {
+        // Remove os estilos de borda
+        let style = GetWindowLongW(hwnd, GWL_STYLE);
+        let mask = (WS_CAPTION.0 | WS_THICKFRAME.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0 | WS_SYSMENU.0) as i32;
+        let new_style = style & !mask;
+        SetWindowLongW(hwnd, GWL_STYLE, new_style);
+
+        // Adiciona estilos estendidos para transparência (apenas WS_EX_LAYERED, sem WS_EX_TRANSPARENT)
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        let ex_mask = WS_EX_LAYERED.0 as i32;
+        let new_ex_style = ex_style | ex_mask;
+        SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style);
+
+        // Configura a transparência da janela
+        let _ = SetLayeredWindowAttributes(
+            hwnd,
+            COLORREF(0), // RGB color key (0 para não usar color key)
+            255, // Alpha (255 = totalmente opaco)
+            LWA_ALPHA,
+        );
+
+        // Força o redraw e remove a moldura
+        let _ = SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        );
     }
 }
 
@@ -1270,6 +1318,9 @@ fn main() {
         .setup(move |app| {
             let handle = app.handle();
             let window = handle.get_webview_window("main").unwrap();
+
+            #[cfg(windows)]
+            remove_window_decorations(window.clone());
 
             // Configurar janela
             window.set_decorations(false)?;

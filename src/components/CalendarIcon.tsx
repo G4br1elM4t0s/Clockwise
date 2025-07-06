@@ -1,0 +1,21 @@
+interface CalendarIconProps {
+  className?: string
+}
+
+export function CalendarIcon({ className }: CalendarIconProps) {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <path
+        d="M18.4 5.6V4.8C18.4 4.36 18.04 4 17.6 4C17.16 4 16.8 4.36 16.8 4.8V5.6H12.8V4.8C12.8 4.36 12.44 4 12 4C11.56 4 11.2 4.36 11.2 4.8V5.6H7.2V4.8C7.2 4.36 6.84 4 6.4 4C5.96 4 5.6 4.36 5.6 4.8V5.6C4.72 5.6 4 6.32 4 7.2V18.4C4 19.28 4.72 20 5.6 20H18.4C19.28 20 20 19.28 20 18.4V7.2C20 6.32 19.28 5.6 18.4 5.6ZM18.4 17.6C18.4 18.04 18.04 18.4 17.6 18.4H6.4C5.96 18.4 5.6 18.04 5.6 17.6V9.6C5.6 9.16 5.96 8.8 6.4 8.8H17.6C18.04 8.8 18.4 9.16 18.4 9.6V17.6Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
