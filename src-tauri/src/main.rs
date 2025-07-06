@@ -3,7 +3,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 
-use tauri::{Manager, PhysicalSize, PhysicalPosition, Emitter};
+use tauri::{Manager, PhysicalSize, LogicalPosition, PhysicalPosition, Emitter};
 use tauri::State;
 use global_hotkey::{GlobalHotKeyManager, hotkey::{HotKey, Modifiers, Code}, GlobalHotKeyEvent};
 use rusqlite::{Connection, Result as SqliteResult, OptionalExtension};
@@ -420,7 +420,7 @@ async fn toggle_collapse(window: tauri::WebviewWindow, is_collapsed: bool) -> Re
         println!("🔧 Estado global atualizado para: {}", *state);
     }
 
-    let new_height = if is_collapsed { 1 } else { 55 };
+    let new_height = if is_collapsed { 1 } else { 70 };
     println!("🔧 Tentando redimensionar janela para altura: {}", new_height);
 
     // Primeiro, tentar redimensionar
@@ -435,13 +435,13 @@ async fn toggle_collapse(window: tauri::WebviewWindow, is_collapsed: bool) -> Re
     // Se colapsada, também mover para posição específica
     if is_collapsed {
         println!("🔧 Movendo janela colapsada para posição (-1, -1)");
-        match window.set_position(PhysicalPosition::new(-1, -1)) {
+        match window.set_position(LogicalPosition::new(-06.5, -1.0)) {
             Ok(_) => println!("✓ Janela movida para posição colapsada"),
             Err(e) => println!("✗ Erro ao mover janela: {}", e),
         }
     } else {
         println!("🔧 Restaurando janela para posição (0, 0)");
-        match window.set_position(PhysicalPosition::new(0, 0)) {
+        match window.set_position(LogicalPosition::new(-06.5, -1.0)) {
             Ok(_) => println!("✓ Janela restaurada para posição normal"),
             Err(e) => println!("✗ Erro ao restaurar janela: {}", e),
         }
@@ -453,58 +453,6 @@ async fn toggle_collapse(window: tauri::WebviewWindow, is_collapsed: bool) -> Re
     match window.inner_size() {
         Ok(size) => println!("🔧 Tamanho atual da janela: {}x{}", size.width, size.height),
         Err(e) => println!("✗ Erro ao obter tamanho da janela: {}", e),
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        println!("🔧 Aplicando configurações wmctrl...");
-        thread::sleep(Duration::from_millis(200));
-
-        if let Ok(output) = Command::new("wmctrl").args(["-l"]).output() {
-            let window_list = String::from_utf8_lossy(&output.stdout);
-            println!("🔧 Procurando janela na lista wmctrl...");
-
-            for line in window_list.lines() {
-                if line.contains("ClockWise") || line.contains("app") || line.contains("Clockwise") {
-                    let window_id = line.split_whitespace().next().unwrap_or("");
-                    println!("🔧 Encontrada janela ID: {} -> {}", window_id, line);
-
-                    if is_collapsed {
-                        println!("🔧 Aplicando configuração colapsada via wmctrl");
-                        // Tentar diferentes abordagens para colapsar
-                        let commands = vec![
-                            vec!["-i", "-r", window_id, "-e", "0,0,-50,1920,1"],
-                            vec!["-i", "-r", window_id, "-e", "0,-1,-1,1920,1"],
-                            vec!["-i", "-r", window_id, "-b", "add,hidden"],
-                        ];
-
-                        for cmd in commands {
-                            match Command::new("wmctrl").args(&cmd).output() {
-                                Ok(_) => println!("✓ Comando wmctrl executado: {:?}", cmd),
-                                Err(e) => println!("✗ Erro no comando wmctrl {:?}: {}", cmd, e),
-                            }
-                        }
-                    } else {
-                        println!("🔧 Aplicando configuração expandida via wmctrl");
-                        let commands = vec![
-                            vec!["-i", "-r", window_id, "-b", "remove,hidden"],
-                            vec!["-i", "-r", window_id, "-e", "0,0,0,1920,55"],
-                            vec!["-i", "-r", window_id, "-b", "add,above"],
-                        ];
-
-                        for cmd in commands {
-                            match Command::new("wmctrl").args(&cmd).output() {
-                                Ok(_) => println!("✓ Comando wmctrl executado: {:?}", cmd),
-                                Err(e) => println!("✗ Erro no comando wmctrl {:?}: {}", cmd, e),
-                            }
-                        }
-                    }
-                    break;
-                }
-            }
-        } else {
-            println!("✗ wmctrl não disponível");
-        }
     }
 
     println!("🔧 toggle_collapse finalizado");
@@ -1187,7 +1135,7 @@ async fn expand_window_for_modal(window: tauri::WebviewWindow) -> Result<(), Str
             println!("✓ Janela expandida para 500px");
 
             // Garantir que a janela esteja visível e na posição correta
-            match window.set_position(PhysicalPosition::new(0, 0)) {
+            match window.set_position(LogicalPosition::new(-06.5, -1.0)) {
                 Ok(_) => println!("✓ Posição da janela ajustada"),
                 Err(e) => println!("✗ Erro ao ajustar posição: {}", e),
             }
@@ -1225,7 +1173,7 @@ async fn reset_window_size(window: tauri::WebviewWindow) -> Result<(), String> {
         Ok(_) => {
             println!("✓ Janela resetada para 55px");
 
-            match window.set_position(PhysicalPosition::new(0, 0)) {
+            match window.set_position(LogicalPosition::new(-06.5, -1.0)) {
                 Ok(_) => println!("✓ Posição da janela ajustada"),
                 Err(e) => println!("✗ Erro ao ajustar posição: {}", e),
             }
@@ -1253,8 +1201,6 @@ async fn reset_window_size(window: tauri::WebviewWindow) -> Result<(), String> {
         }
     }
 }
-
-
 
 fn main() {
     println!("Iniciando aplicação ClockWise...");
@@ -1325,9 +1271,13 @@ fn main() {
             let handle = app.handle();
             let window = handle.get_webview_window("main").unwrap();
 
-            // Configurar tamanho e posição inicial
+            // Configurar janela
+            window.set_decorations(false)?;
             window.set_size(PhysicalSize::new(1920, 55))?;
-            window.set_position(PhysicalPosition::new(0, 0))?;
+            window.set_always_on_top(true)?;
+
+            // Posicionar a janela
+            window.set_position(PhysicalPosition::new(-7, -2))?;
 
             // Thread para monitorar mudanças de volume do sistema
             let window_for_volume = window.clone();
@@ -1525,8 +1475,8 @@ mod tests {
 
         // Verificar posição
         let position = mock_window.position().unwrap();
-        assert_eq!(position.x, 0);
-        assert_eq!(position.y, 0);
+        assert_eq!(position.x, 0.0);
+        assert_eq!(position.y, 0.0);
     }
 
     // Teste para reset_window_size
@@ -1545,8 +1495,8 @@ mod tests {
 
         // Verificar posição
         let position = mock_window.position().unwrap();
-        assert_eq!(position.x, 0);
-        assert_eq!(position.y, 0);
+        assert_eq!(position.x, 0.0);
+        assert_eq!(position.y, 0.0);
     }
 
     // Testes para as funções de tarefa

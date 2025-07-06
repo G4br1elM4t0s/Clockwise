@@ -48,7 +48,7 @@ function App() {
   }, [isModalOpen])
 
   return (
-    <div className="fixed top-0 left-0 right-0">
+    <div className="fixed top-0 left-0 right-0 select-none">
       <TaskFooter onAddClick={handleOpenModal} buttonRef={buttonRef} />
       <TaskModal isOpen={isModalOpen} onClose={handleCloseModal} anchorEl={buttonRef} />
     </div>
