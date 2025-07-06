@@ -1,7 +1,11 @@
+import { ClockIcon } from "../components/ClockIcon"
+
 interface TimeInputProps {
   value: string
   onChange: (value: string) => void
 }
+
+
 
 export default function TimeInput({ value, onChange }: TimeInputProps) {
   const formatOnBlur = (raw: string): string => {
@@ -46,14 +50,17 @@ export default function TimeInput({ value, onChange }: TimeInputProps) {
   }
 
   return (
-    <input
+    <div className="flex gap-1 items-center">
+        <ClockIcon className="w-12 h-12 text-[#F2F2F2]" />
+          <input
       type="text"
       value={value}
       onChange={handleChange}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      className="w-full h-7 pl-6 pr-4 bg-zinc-700/50 rounded-full text-white text-center text-sm font-mono focus:outline-none"
+      className="w-full h-7 pl-6 pr-4 bg-[#D9D9D9] rounded-full text-[#181818] text-center text-sm font-medium focus:outline-none"
       placeholder="00:00:00"
     />
+    </div>
   )
 }

@@ -1,11 +1,12 @@
 import type { RefObject } from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useTaskStore } from "../store/task.store"
 import type { Task } from "../store/task.store"
 import { invoke } from "@tauri-apps/api/core"
 import { Check, X } from "lucide-react"
 import TimeInput from "./TimeInput"
 import DateInput from "./DateInput"
+import { CustomCheckbox } from '../components/CustomCheckbox'
 
 interface TaskModalProps {
   isOpen: boolean
@@ -16,8 +17,11 @@ interface TaskModalProps {
 export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
   const { addTask } = useTaskStore()
   const [taskName, setTaskName] = useState("")
-  const [timeInput, setTimeInput] = useState("00:00:00")
-  const [scheduledDate, setScheduledDate] = useState(new Date())
+  const [description, setDescription] = useState("")
+  const [timeInput, setTimeInput] = useState("01:00:00")
+  const [startDate, setStartDate] = useState(new Date())
+  const [endDate, setEndDate] = useState(new Date())
+  const [indefiniteEnd, setIndefiniteEnd] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const [shouldCount, setShouldCount] = useState(true)
 
@@ -50,9 +54,11 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
 
       const task: Task = {
         name: taskName.trim(),
+        description: description.trim(),
         user: "Gabriel",
         estimated_hours: totalHours,
-        scheduled_date: scheduledDate.toISOString().split("T")[0],
+        scheduled_date: startDate.toISOString().split("T")[0],
+        end_date: indefiniteEnd ? null : endDate.toISOString().split("T")[0],
         status: "pending" as const,
         created_at: new Date().toISOString(),
         started_at: null,
@@ -61,8 +67,11 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
 
       await addTask(task)
       setTaskName("")
+      setDescription("")
       setTimeInput("00:00:00")
-      setScheduledDate(new Date())
+      setStartDate(new Date())
+      setEndDate(new Date())
+      setIndefiniteEnd(false)
       onClose()
 
       setTimeout(async () => {
@@ -78,114 +87,159 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
     }
   }
 
+  const calculateTotalTime = useMemo(() => {
+    if (indefiniteEnd) return null;
+
+    // Calcula diferença em dias
+    const diffInDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    // Converte o timeInput (HH:mm:ss) em segundos
+    const [hours, minutes, seconds] = timeInput.split(':').map(Number);
+    const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+
+    // Adiciona os dias convertidos em segundos
+    const totalSecondsWithDays = totalSeconds + (diffInDays * 24 * 3600);
+
+    // Converte para o formato desejado
+    const d = Math.floor(totalSecondsWithDays / (3600 * 24));
+    const h = Math.floor((totalSecondsWithDays % (3600 * 24)) / 3600);
+    const m = Math.floor((totalSecondsWithDays % 3600) / 60);
+    const s = totalSecondsWithDays % 60;
+
+    return `${String(d).padStart(2, '0')}d${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
+  }, [startDate, endDate, indefiniteEnd, timeInput]);
+
   if (!isOpen) return null
 
   return (
     <div
-      className="fixed z-50 bg-zinc-800/90 backdrop-blur-sm rounded-3xl shadow-lg w-96 task-modal"
+      className="fixed z-50 bg-zinc-800/90 backdrop-blur-sm rounded-lg shadow-lg w-96 p-6 task-modal"
       style={{
         top: position.top,
         left: position.left
       }}
       onClick={e => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-zinc-100">Nova Tarefa</h2>
+      <div
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-lg bg-[#1A1A1A] rounded-lg p-6 relative"
+      >
         <button
           onClick={e => {
             e.stopPropagation()
             onClose()
           }}
-          className="text-zinc-400 hover:text-zinc-100"
+          className="absolute right-6 top-1 text-white/70 hover:text-white transition-colors"
         >
           <X className="w-5 h-5" />
         </button>
-      </div>
 
-      <form
-        onSubmit={e => {
-          e.stopPropagation()
-          handleAddTask(e)
-        }}
-        className="flex flex-col gap-4"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Task Name */}
-        <div className="flex flex-col gap-2" onClick={e => e.stopPropagation()}>
-          <label className="text-white/70 text-sm uppercase px-6 py-1">Nome da Tarefa</label>
-          <input
-            type="text"
-            value={taskName}
-            onChange={e => setTaskName(e.target.value)}
-            onClick={e => e.stopPropagation()}
-            className="w-full px-6 py-3 bg-zinc-700/50 rounded-full text-white focus:outline-none text-center text-lg font-medium"
-            autoFocus
-            required
-          />
-        </div>
+        <h2 className="text-xl font-semibold text-white text-center mb-6">NOVA TAREFA</h2>
 
-        {/* Description */}
-        <div className="flex flex-col gap-2" onClick={e => e.stopPropagation()}>
-          <label className="text-white/70 text-sm uppercase px-6 py-1">Descrição</label>
-          <textarea
-            onClick={e => e.stopPropagation()}
-            className="w-full px-6 py-4 bg-zinc-700/50 rounded-lg text-white focus:outline-none min-h-[100px] resize-none"
-          />
-        </div>
-
-        {/* Date and Time Inputs */}
-        <div className="flex gap-4" onClick={e => e.stopPropagation()}>
-          <div className="w-3/6 flex flex-col gap-2">
-            <label className="text-white/70 text-sm uppercase px-6 py-1">Data</label>
-            <DateInput value={scheduledDate} onChange={setScheduledDate} />
-          </div>
-          <div className="w-3/6 flex flex-col gap-2">
-            <label className="text-white/70 text-sm uppercase px-6 py-1">Tempo</label>
-            <TimeInput value={timeInput} onChange={handleTimeChange} />
-          </div>
-        </div>
-
-        {/* Checkbox for counting */}
-        <label
-          className="flex items-center gap-2 rounded-full px-4 py-2 cursor-pointer group"
+        <form
+          onSubmit={e => {
+            e.stopPropagation()
+            handleAddTask(e)
+          }}
+          className="flex flex-col gap-4"
           onClick={e => e.stopPropagation()}
         >
-          <div
-            className={`w-6 h-c6 rounded-full flex items-center justify-center transition-colors ${
-              shouldCount ? "bg-[#17FF8B]" : "bg-white/10"
-            }`}
-            onClick={e => {
-              e.stopPropagation()
-              setShouldCount(!shouldCount)
-            }}
-          >
-            <Check className={`w-4 h-4 ${shouldCount ? "text-zinc-800" : "text-white/30"}`} />
+          {/* Task Name */}
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              value={taskName}
+              onChange={e => setTaskName(e.target.value)}
+              placeholder="Nome da Tarefa"
+              className="w-full px-4 py-2 bg-zinc-700/50 rounded-lg text-white placeholder:pl-2 focus:outline-none text-base"
+              autoFocus
+              required
+            />
           </div>
-          <span className="text-white uppercase group-hover:text-white/80 transition-colors">
-            Contabilizar
-          </span>
-        </label>
 
-        {/* Action Buttons */}
-        <div className="flex justify-between gap-4 mt-2" onClick={e => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation()
-              onClose()
-            }}
-            className="flex-1 h-7 cursor-pointer bg-zinc-700/50 hover:bg-zinc-700 text-white rounded-full transition-colors"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            className="flex-1 h-7 cursor-pointer bg-[#17FF8B] hover:bg-[#17FF8B]/90 text-black rounded-full transition-colors"
-          >
-            Concluir
-          </button>
-        </div>
-      </form>
+          {/* Description */}
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Descrição"
+              className="w-full px-4 py-3 bg-zinc-700/50 rounded-lg text-white focus:outline-none min-h-[100px] resize-none text-base"
+            />
+          </div>
+
+          {/* Date Inputs */}
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 w-3/6">
+              <label className="text-white/70 text-sm">Data inicial</label>
+              <DateInput value={startDate} onChange={setStartDate} />
+            </div>
+            <div className="flex flex-col  w-3/6 gap-2">
+              <label className="text-white/70 text-sm">Tempo estimado</label>
+              <TimeInput value={timeInput} onChange={handleTimeChange} />
+            </div>
+            </div>
+
+            <div className="flex items-center h-16 gap-2 justify-between w-full">
+              {/* Campo Data final */}
+              <div className="flex flex-col gap-2 w-3/6">
+                <label className="text-white/70 text-sm">Data final</label>
+                {!indefiniteEnd && <DateInput value={endDate} onChange={setEndDate} />}
+              </div>
+
+              {/* Checkbox Contabilizar */}
+              <div className="flex items-end h-full pb-2 w-3/6">
+                <CustomCheckbox
+                  checked={shouldCount}
+                  onChange={setShouldCount}
+                  label="CONTABILIZAR TAREFA"
+                  className="whitespace-nowrap"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={indefiniteEnd}
+                    onChange={e => setIndefiniteEnd(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div className={`w-3 h-3 border rounded ${indefiniteEnd ? 'bg-[#17FF8B] border-[#17FF8B]' : 'border-white/30'} flex items-center justify-center`}>
+                    {indefiniteEnd && <Check className="w-2 h-2 text-black" />}
+                  </div>
+                  <span className="text-white/70 text-xs">Indefinir data final</span>
+                </label>
+
+            {/* Tempo Total */}
+            {!indefiniteEnd && calculateTotalTime && (
+              <div className="flex items-center justify-center mt-4">
+                <span className="text-[#F2F2F2] text-sm font-medium">
+                  Tempo Total: {calculateTotalTime}
+                </span>
+              </div>
+            )}
+
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex items-center gap-4 mt-8">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 h-6 bg-[#7F7F7F] hover:bg-white/10 text-white rounded-full  text-xs font-bold  transition-color cursor-pointer"
+            >
+              CANCELAR
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 h-6 bg-[#17FF8B] hover:bg-[#17FF8B]/90 text-xs font-bold  text-black rounded-full transition-colors cursor-pointer"
+            >
+              CONFIRMAR
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

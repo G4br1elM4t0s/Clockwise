@@ -4,9 +4,11 @@ import { invoke } from "@tauri-apps/api/core"
 export type Task = {
   id?: string
   name: string
+  description?: string
   user: string
   estimated_hours: number
   scheduled_date: string
+  end_date?: string | null
   status: "pending" | "in_progress" | "paused" | "waiting" | "completed"
   created_at: string
   started_at: string | null
@@ -83,9 +85,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // Mapear os dados do formulário para o formato que o Rust espera
       const params = {
         name: task.name,
+        description: task.description || "",
         user: task.user,
         estimatedHours: task.estimated_hours,
-        scheduledDate: task.scheduled_date
+        scheduledDate: task.scheduled_date,
+        endDate: task.end_date
       }
 
       console.log("Enviando dados do formulário para o Rust:", params)

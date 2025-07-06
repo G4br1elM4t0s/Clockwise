@@ -1136,7 +1136,7 @@ async fn get_today_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>
 async fn expand_window_for_modal(window: tauri::WebviewWindow) -> Result<(), String> {
     println!("🔧 Expandindo janela para modal...");
 
-    match window.set_size(PhysicalSize::new(1920, 700)) {
+    match window.set_size(PhysicalSize::new(1920, 800)) {
         Ok(_) => {
             println!("✓ Janela expandida para 500px");
 
