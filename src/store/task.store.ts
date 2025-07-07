@@ -7,12 +7,15 @@ export type Task = {
   description?: string
   user: string
   estimated_hours: number
+  worked_hours: number
   scheduled_date: string
   end_date?: string | null
   status: "pending" | "in_progress" | "paused" | "waiting" | "completed"
   created_at: string
   started_at: string | null
   completed_at: string | null
+  should_count: boolean
+  count_value: number
 }
 
 export type ActiveSessionInfo = {
@@ -43,6 +46,9 @@ type TaskStore = {
   loadTasks: () => Promise<void>
   loadTasksWithSessions: () => Promise<void>
   addTask: (task: Task) => Promise<void>
+  updateTask: (taskId: string, task: Partial<Task>) => Promise<void>
+  incrementTaskCount: (taskId: string) => Promise<number>
+  rescheduleTasks: () => Promise<number[]>
   startTask: (taskId: string) => Promise<void>
   startTaskWithoutStopping: (taskId: string) => Promise<void>
   pauseTask: (taskId: string) => Promise<void>
@@ -50,6 +56,7 @@ type TaskStore = {
   completeTask: (taskId: string) => Promise<void>
   deleteTask: (taskId: string) => Promise<void>
   getTaskRemainingTime: (taskId: string) => Promise<number>
+  getTaskTotalWorkedTime: (taskId: string) => Promise<number>
   checkPomodoroSessions: () => Promise<number[]>
   getTodayTasks: () => Task[]
   getTodayTasksWithSessions: () => TaskWithActiveSession[]
@@ -85,11 +92,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       // Mapear os dados do formulário para o formato que o Rust espera
       const params = {
         name: task.name,
-        description: task.description || "",
+        description: task.description || null,
         user: task.user,
         estimatedHours: task.estimated_hours,
         scheduledDate: task.scheduled_date,
-        endDate: task.end_date
+        endDate: task.end_date || null,
+        shouldCount: task.should_count,
+        countValue: task.count_value
       }
 
       console.log("Enviando dados do formulário para o Rust:", params)
@@ -102,6 +111,58 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       await Promise.all([get().loadTasks(), get().loadTasksWithSessions()])
     } catch (error) {
       console.error("Erro detalhado ao chamar add_task no Rust:", error)
+      throw error
+    }
+  },
+
+  updateTask: async (taskId: string, task: Partial<Task>) => {
+    try {
+      const params = {
+        taskId,
+        name: task.name!,
+        description: task.description || null,
+        estimatedHours: task.estimated_hours!,
+        workedHours: task.worked_hours!,
+        scheduledDate: task.scheduled_date!,
+        endDate: task.end_date || null,
+        shouldCount: task.should_count!
+      }
+
+      await invoke("update_task", params)
+
+      // Recarregar ambos os tipos de dados
+      await Promise.all([get().loadTasks(), get().loadTasksWithSessions()])
+    } catch (error) {
+      console.error("Error updating task:", error)
+      throw error
+    }
+  },
+
+  incrementTaskCount: async (taskId: string) => {
+    try {
+      const newCount = await invoke<number>("increment_task_count", { taskId })
+
+      // Recarregar ambos os tipos de dados
+      await Promise.all([get().loadTasks(), get().loadTasksWithSessions()])
+
+      return newCount
+    } catch (error) {
+      console.error("Error incrementing task count:", error)
+      throw error
+    }
+  },
+
+  rescheduleTasks: async () => {
+    try {
+      const rescheduledTaskIds = await invoke<number[]>("reschedule_tasks")
+
+      // Recarregar ambos os tipos de dados após remanejamento
+      await Promise.all([get().loadTasks(), get().loadTasksWithSessions()])
+
+      console.log(`🔄 ${rescheduledTaskIds.length} tarefas remanejadas:`, rescheduledTaskIds)
+      return rescheduledTaskIds
+    } catch (error) {
+      console.error("Error rescheduling tasks:", error)
       throw error
     }
   },
@@ -179,6 +240,16 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     } catch (error) {
       console.error("Error getting task remaining time:", error)
       return 0
+    }
+  },
+
+  getTaskTotalWorkedTime: async (taskId: string) => {
+    try {
+      const totalSeconds = await invoke<number>("get_task_total_worked_time", { taskId: parseInt(taskId) })
+      return totalSeconds
+    } catch (error) {
+      console.error("Error getting task total worked time:", error)
+      throw error
     }
   },
 

@@ -7,7 +7,7 @@ use tauri::{Manager, PhysicalSize, LogicalPosition, PhysicalPosition, Emitter};
 use tauri::State;
 use global_hotkey::{GlobalHotKeyManager, hotkey::{HotKey, Modifiers, Code}, GlobalHotKeyEvent};
 use rusqlite::{Connection, Result as SqliteResult, OptionalExtension};
-use chrono::Utc;
+use chrono::{Utc, Datelike};
 use serde::{Deserialize, Serialize};
 
 #[cfg(windows)]
@@ -16,22 +16,25 @@ use windows::{
     Win32::UI::WindowsAndMessaging::*,
 };
 
-// Estado compartilhado para controlar se está colapsado
 static COLLAPSED_STATE: Mutex<bool> = Mutex::new(false);
-// Último tempo que o atalho foi executado (para debounce)
+
 static LAST_HOTKEY_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Task {
     id: Option<i64>,
     name: String,
+    description: Option<String>,
     user: String,
     estimated_hours: f64,
     scheduled_date: String,
+    end_date: Option<String>,
     status: String,
     created_at: String,
     started_at: Option<String>,
     completed_at: Option<String>,
+    should_count: bool,
+    count_value: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -63,13 +66,17 @@ struct ActiveSession {
 struct TaskWithActiveSession {
     id: Option<i64>,
     name: String,
+    description: Option<String>,
     user: String,
     estimated_hours: f64,
     scheduled_date: String,
+    end_date: Option<String>,
     status: String,
     created_at: String,
     started_at: Option<String>,
     completed_at: Option<String>,
+    should_count: bool,
+    count_value: u32,
     active_session: Option<ActiveSessionInfo>,
     pomodoro_sessions: Vec<PomodoroSessionInfo>,
 }
@@ -100,6 +107,7 @@ struct DatabaseState {
 fn init_database() -> SqliteResult<Connection> {
     let conn = Connection::open("tasks.db")?;
 
+    // Criar tabela original primeiro
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +122,11 @@ fn init_database() -> SqliteResult<Connection> {
         )",
         [],
     )?;
+
+    // Migrar banco para adicionar novas colunas se elas não existirem
+    migrate_database(&conn)?;
+
+    // Criar outras tabelas
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS task_time_logs (
@@ -151,6 +164,171 @@ fn init_database() -> SqliteResult<Connection> {
     )?;
 
     Ok(conn)
+}
+
+fn migrate_database(conn: &Connection) -> SqliteResult<()> {
+    // Verificar se as novas colunas existem
+    let mut has_description = false;
+    let mut has_end_date = false;
+    let mut has_should_count = false;
+    let mut has_count_value = false;
+
+    // Verificar estrutura da tabela
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let column_iter = stmt.query_map([], |row| {
+        Ok(row.get::<_, String>(1)?) // column name
+    })?;
+
+    for column_result in column_iter {
+        let column_name = column_result?;
+        match column_name.as_str() {
+            "description" => has_description = true,
+            "end_date" => has_end_date = true,
+            "should_count" => has_should_count = true,
+            "count_value" => has_count_value = true,
+            _ => {}
+        }
+    }
+
+    // Adicionar colunas que não existem
+    if !has_description {
+        println!("🔄 Adicionando coluna 'description' à tabela tasks");
+        conn.execute("ALTER TABLE tasks ADD COLUMN description TEXT", [])?;
+    }
+
+    if !has_end_date {
+        println!("🔄 Adicionando coluna 'end_date' à tabela tasks");
+        conn.execute("ALTER TABLE tasks ADD COLUMN end_date TEXT", [])?;
+    }
+
+    if !has_should_count {
+        println!("🔄 Adicionando coluna 'should_count' à tabela tasks");
+        conn.execute("ALTER TABLE tasks ADD COLUMN should_count BOOLEAN NOT NULL DEFAULT 1", [])?;
+    }
+
+    if !has_count_value {
+        println!("🔄 Adicionando coluna 'count_value' à tabela tasks");
+        conn.execute("ALTER TABLE tasks ADD COLUMN count_value INTEGER NOT NULL DEFAULT 0", [])?;
+    }
+
+    println!("✅ Migração do banco de dados concluída");
+    Ok(())
+}
+
+fn get_next_business_day(date: chrono::NaiveDate) -> chrono::NaiveDate {
+    let mut next_day = date + chrono::Duration::days(1);
+
+    // Pular fins de semana (sábado = 6, domingo = 0)
+    while next_day.weekday().num_days_from_monday() >= 5 {
+        next_day = next_day + chrono::Duration::days(1);
+    }
+
+    next_day
+}
+
+fn calculate_total_worked_seconds(conn: &Connection, task_id: i64) -> Result<i64, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT started_at, ended_at FROM task_time_logs WHERE task_id = ?1"
+    )?;
+
+    let log_iter = stmt.query_map([task_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?, // started_at
+            row.get::<_, Option<String>>(1)?, // ended_at
+        ))
+    })?;
+
+    let mut total_seconds = 0i64;
+    let now = chrono::Utc::now();
+
+    for log_result in log_iter {
+        let (started_at_str, ended_at_opt) = log_result?;
+
+        let started_at = chrono::DateTime::parse_from_rfc3339(&started_at_str)
+            .map_err(|_| rusqlite::Error::InvalidColumnType(0, "started_at".to_string(), rusqlite::types::Type::Text))?;
+
+        let ended_at = match ended_at_opt {
+            Some(ended_at_str) => {
+                chrono::DateTime::parse_from_rfc3339(&ended_at_str)
+                    .map_err(|_| rusqlite::Error::InvalidColumnType(1, "ended_at".to_string(), rusqlite::types::Type::Text))?
+            }
+            None => now.into() // Se ainda está ativo, usar tempo atual
+        };
+
+        let duration = ended_at.signed_duration_since(started_at);
+        total_seconds += duration.num_seconds();
+    }
+
+    Ok(total_seconds)
+}
+
+fn reschedule_incomplete_tasks(conn: &Connection) -> Result<Vec<i64>, rusqlite::Error> {
+    let today = chrono::Local::now().date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+    let next_business_day = get_next_business_day(today);
+
+    println!("🔄 Verificando tarefas para remanejar de {} para {}", yesterday, next_business_day);
+
+    // Buscar tarefas elegíveis para remanejamento:
+    // 1. scheduled_date <= ontem
+    // 2. end_date IS NULL (sem data final definida)
+    // 3. status != 'completed'
+    // 4. estimated_hours > 0
+    let mut stmt = conn.prepare(
+        "SELECT id, name, estimated_hours, scheduled_date
+         FROM tasks
+         WHERE scheduled_date <= ?1
+           AND end_date IS NULL
+           AND status != 'completed'
+           AND estimated_hours > 0
+         ORDER BY scheduled_date ASC"
+    )?;
+
+    let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
+    let task_candidates: Vec<(i64, String, f64, String)> = stmt.query_map([&yesterday_str], |row| {
+        Ok((
+            row.get(0)?, // id
+            row.get(1)?, // name
+            row.get(2)?, // estimated_hours
+            row.get(3)?, // scheduled_date
+        ))
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    let mut rescheduled_tasks = Vec::new();
+
+    for (task_id, task_name, estimated_hours, scheduled_date) in task_candidates {
+        // Calcular tempo total trabalhado
+        let total_worked_seconds = calculate_total_worked_seconds(conn, task_id)?;
+        let estimated_seconds = (estimated_hours * 3600.0) as i64;
+        let remaining_seconds = estimated_seconds - total_worked_seconds;
+
+        println!("📊 Tarefa {}: {} - Estimado: {}h, Trabalhado: {}s, Restante: {}s",
+            task_id, task_name, estimated_hours, total_worked_seconds, remaining_seconds);
+
+        // Se ainda há tempo restante significativo (mais de 1 minuto), remanejar
+        if remaining_seconds > 60 {
+            let next_day_str = next_business_day.format("%Y-%m-%d").to_string();
+
+            // Atualizar scheduled_date para próximo dia útil
+            conn.execute(
+                "UPDATE tasks SET scheduled_date = ?1 WHERE id = ?2",
+                rusqlite::params![&next_day_str, task_id],
+            )?;
+
+            println!("📅 Tarefa {} remanejada de {} para {}", task_id, scheduled_date, next_day_str);
+            rescheduled_tasks.push(task_id);
+        } else {
+            println!("✅ Tarefa {} quase concluída, não remanejando", task_id);
+        }
+    }
+
+    if !rescheduled_tasks.is_empty() {
+        println!("🔄 {} tarefas remanejadas para {}", rescheduled_tasks.len(), next_business_day);
+    } else {
+        println!("✅ Nenhuma tarefa precisou ser remanejada");
+    }
+
+    Ok(rescheduled_tasks)
 }
 
 fn debug_task_time_logs(conn: &Connection, task_id: i64) -> Result<(), rusqlite::Error> {
@@ -627,7 +805,7 @@ async fn load_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>, Str
     let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, user, estimated_hours, scheduled_date, status, created_at, started_at, completed_at
+        "SELECT id, name, description, user, estimated_hours, scheduled_date, end_date, status, created_at, started_at, completed_at, should_count, count_value
          FROM tasks ORDER BY scheduled_date ASC, created_at ASC"
     ).map_err(|e| e.to_string())?;
 
@@ -635,13 +813,17 @@ async fn load_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>, Str
         Ok(Task {
             id: Some(row.get(0)?),
             name: row.get(1)?,
-            user: row.get(2)?,
-            estimated_hours: row.get(3)?,
-            scheduled_date: row.get(4)?,
-            status: row.get(5)?,
-            created_at: row.get(6)?,
-            started_at: row.get(7)?,
-            completed_at: row.get(8)?,
+            description: row.get(2)?,
+            user: row.get(3)?,
+            estimated_hours: row.get(4)?,
+            scheduled_date: row.get(5)?,
+            end_date: row.get(6)?,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            should_count: row.get(11)?,
+            count_value: row.get(12)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -656,18 +838,32 @@ async fn load_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>, Str
 #[tauri::command]
 async fn add_task(
     name: String,
+    description: Option<String>,
     user: String,
     estimated_hours: f64,
     scheduled_date: String,
+    end_date: Option<String>,
+    should_count: bool,
+    count_value: u32,
     db_state: State<'_, DatabaseState>
 ) -> Result<Task, String> {
     let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
     let now = Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO tasks (name, user, estimated_hours, scheduled_date, status, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
-        [&name, &user, &estimated_hours.to_string(), &scheduled_date, &now],
+        "INSERT INTO tasks (name, description, user, estimated_hours, scheduled_date, end_date, status, created_at, should_count, count_value)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7, ?8, ?9)",
+        rusqlite::params![
+            &name,
+            description.as_deref(),
+            &user,
+            estimated_hours,
+            &scheduled_date,
+            end_date.as_deref(),
+            &now,
+            should_count,
+            count_value
+        ],
     ).map_err(|e| e.to_string())?;
 
     let id = conn.last_insert_rowid();
@@ -679,13 +875,17 @@ async fn add_task(
     Ok(Task {
         id: Some(id),
         name,
+        description,
         user,
         estimated_hours,
         scheduled_date,
+        end_date,
         status: "pending".to_string(),
         created_at: now,
         started_at: None,
         completed_at: None,
+        should_count,
+        count_value,
     })
 }
 
@@ -822,8 +1022,8 @@ async fn load_tasks_with_sessions(db_state: State<'_, DatabaseState>) -> Result<
     let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.name, t.user, t.estimated_hours, t.scheduled_date, t.status,
-                t.created_at, t.started_at, t.completed_at,
+        "SELECT t.id, t.name, t.description, t.user, t.estimated_hours, t.scheduled_date, t.end_date, t.status,
+                t.created_at, t.started_at, t.completed_at, t.should_count, t.count_value,
                 a.started_at as session_started_at, p.session_type, p.duration_seconds
          FROM tasks t
          LEFT JOIN active_sessions a ON t.id = a.task_id
@@ -839,15 +1039,15 @@ async fn load_tasks_with_sessions(db_state: State<'_, DatabaseState>) -> Result<
 
     let task_iter = stmt.query_map([], |row| {
         let task_id: i64 = row.get(0)?;
-        let session_started_at: Option<String> = row.get(9)?;
-        let session_type: Option<String> = row.get(10)?;
-        let duration_seconds: Option<i32> = row.get(11)?;
+        let session_started_at: Option<String> = row.get(13)?;
+        let session_type: Option<String> = row.get(14)?;
+        let duration_seconds: Option<i32> = row.get(15)?;
 
         let active_session = if let (Some(started_at), Some(s_type), Some(duration)) =
             (session_started_at, session_type, duration_seconds) {
 
             let started_time = chrono::DateTime::parse_from_rfc3339(&started_at)
-                .map_err(|_| rusqlite::Error::InvalidColumnType(9, "session_started_at".to_string(), rusqlite::types::Type::Text))?;
+                .map_err(|_| rusqlite::Error::InvalidColumnType(13, "session_started_at".to_string(), rusqlite::types::Type::Text))?;
             let ends_at = started_time + chrono::Duration::seconds(duration as i64);
 
             Some(ActiveSessionInfo {
@@ -863,13 +1063,17 @@ async fn load_tasks_with_sessions(db_state: State<'_, DatabaseState>) -> Result<
         Ok(TaskWithActiveSession {
             id: Some(task_id),
             name: row.get(1)?,
-            user: row.get(2)?,
-            estimated_hours: row.get(3)?,
-            scheduled_date: row.get(4)?,
-            status: row.get(5)?,
-            created_at: row.get(6)?,
-            started_at: row.get(7)?,
-            completed_at: row.get(8)?,
+            description: row.get(2)?,
+            user: row.get(3)?,
+            estimated_hours: row.get(4)?,
+            scheduled_date: row.get(5)?,
+            end_date: row.get(6)?,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            should_count: row.get(11)?,
+            count_value: row.get(12)?,
             active_session,
             pomodoro_sessions: Vec::new(), // Será preenchido depois
         })
@@ -1101,12 +1305,81 @@ async fn delete_task(task_id: i64, db_state: State<'_, DatabaseState>) -> Result
 }
 
 #[tauri::command]
+async fn increment_task_count(task_id: i64, db_state: State<'_, DatabaseState>) -> Result<u32, String> {
+    let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
+
+    // Buscar o valor atual do contador
+    let mut stmt = conn.prepare(
+        "SELECT count_value FROM tasks WHERE id = ?1"
+    ).map_err(|e| e.to_string())?;
+
+    let current_count: u32 = stmt.query_row([task_id], |row| row.get(0))
+        .map_err(|_| "Tarefa não encontrada".to_string())?;
+
+    // Incrementar o contador
+    let new_count = current_count + 1;
+
+    // Atualizar no banco
+    conn.execute(
+        "UPDATE tasks SET count_value = ?1 WHERE id = ?2",
+        rusqlite::params![new_count, task_id],
+    ).map_err(|e| e.to_string())?;
+
+    println!("Contador da tarefa {} incrementado: {} -> {}", task_id, current_count, new_count);
+    Ok(new_count)
+}
+
+#[tauri::command]
+async fn update_task(
+    task_id: i64,
+    name: String,
+    description: Option<String>,
+    estimated_hours: f64,
+    scheduled_date: String,
+    end_date: Option<String>,
+    should_count: bool,
+    db_state: State<'_, DatabaseState>
+) -> Result<(), String> {
+    let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
+
+    // Pegar o tempo trabalhado atual
+    let total_worked_seconds = calculate_total_worked_seconds(&conn, task_id)
+        .map_err(|e| e.to_string())?;
+    let worked_hours = total_worked_seconds as f64 / 3600.0;
+
+    conn.execute(
+        "UPDATE tasks SET name = ?1, description = ?2, estimated_hours = ?3, scheduled_date = ?4, end_date = ?5, should_count = ?6 WHERE id = ?7",
+        rusqlite::params![
+            &name,
+            description.as_deref(),
+            estimated_hours,
+            &scheduled_date,
+            end_date.as_deref(),
+            should_count,
+            task_id
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn reschedule_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<i64>, String> {
+    let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
+
+    let rescheduled_tasks = reschedule_incomplete_tasks(&conn)
+        .map_err(|e| e.to_string())?;
+
+    Ok(rescheduled_tasks)
+}
+
+#[tauri::command]
 async fn get_today_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>, String> {
     let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, user, estimated_hours, scheduled_date, status, created_at, started_at, completed_at
+        "SELECT id, name, description, user, estimated_hours, scheduled_date, end_date, status, created_at, started_at, completed_at, should_count, count_value
          FROM tasks WHERE scheduled_date = ?1 ORDER BY created_at ASC"
     ).map_err(|e| e.to_string())?;
 
@@ -1114,13 +1387,17 @@ async fn get_today_tasks(db_state: State<'_, DatabaseState>) -> Result<Vec<Task>
         Ok(Task {
             id: Some(row.get(0)?),
             name: row.get(1)?,
-            user: row.get(2)?,
-            estimated_hours: row.get(3)?,
-            scheduled_date: row.get(4)?,
-            status: row.get(5)?,
-            created_at: row.get(6)?,
-            started_at: row.get(7)?,
-            completed_at: row.get(8)?,
+            description: row.get(2)?,
+            user: row.get(3)?,
+            estimated_hours: row.get(4)?,
+            scheduled_date: row.get(5)?,
+            end_date: row.get(6)?,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            should_count: row.get(11)?,
+            count_value: row.get(12)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1250,6 +1527,90 @@ fn remove_window_decorations(window: tauri::WebviewWindow) {
     }
 }
 
+#[tauri::command]
+async fn get_task_total_worked_time(task_id: i64, db_state: State<'_, DatabaseState>) -> Result<i64, String> {
+    let conn = db_state.connection.lock().map_err(|e| e.to_string())?;
+    let total_seconds = calculate_total_worked_seconds(&conn, task_id)
+        .map_err(|e| e.to_string())?;
+    Ok(total_seconds)
+}
+
+#[tauri::command]
+async fn get_task_by_id(task_id: i64, db_state: State<'_, DatabaseState>) -> Result<TaskWithActiveSession, String> {
+    let conn = db_state.connection.lock().unwrap();
+
+    let mut stmt = conn.prepare(
+        "SELECT t.*,
+                GROUP_CONCAT(CASE
+                    WHEN ps.id IS NOT NULL THEN
+                        json_object(
+                            'id', ps.id,
+                            'session_number', ps.session_number,
+                            'session_type', ps.session_type,
+                            'duration_seconds', ps.duration_seconds,
+                            'created_at', ps.created_at,
+                            'is_active', CASE WHEN acs.task_id IS NOT NULL THEN 1 ELSE 0 END,
+                            'started_at', acs.started_at
+                        )
+                    ELSE NULL
+                END) as pomodoro_sessions,
+                json_object(
+                    'session_type', CASE WHEN acs.task_id IS NOT NULL THEN ps_active.session_type ELSE NULL END,
+                    'started_at', acs.started_at,
+                    'ends_at', CASE
+                        WHEN acs.started_at IS NOT NULL THEN
+                            datetime(acs.started_at, '+' || ps_active.duration_seconds || ' seconds')
+                        ELSE NULL
+                    END,
+                    'duration_seconds', ps_active.duration_seconds
+                ) as active_session
+        FROM tasks t
+        LEFT JOIN pomodoro_sessions ps ON t.id = ps.task_id
+        LEFT JOIN active_sessions acs ON t.id = acs.task_id
+        LEFT JOIN pomodoro_sessions ps_active ON acs.pomodoro_id = ps_active.id
+        WHERE t.id = ?
+        GROUP BY t.id"
+    ).map_err(|e| e.to_string())?;
+
+    let task: TaskWithActiveSession = stmt.query_row([task_id], |row| {
+        let pomodoro_sessions_str: Option<String> = row.get(13)?;
+        let active_session_str: String = row.get(14)?;
+
+        let pomodoro_sessions = if let Some(sessions_str) = pomodoro_sessions_str {
+            serde_json::from_str(&format!("[{}]", sessions_str))
+                .unwrap_or_else(|_| Vec::new())
+        } else {
+            Vec::new()
+        };
+
+        let active_session = if active_session_str.contains("null") {
+            None
+        } else {
+            serde_json::from_str(&active_session_str).ok()
+        };
+
+        Ok(TaskWithActiveSession {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            user: row.get(3)?,
+            estimated_hours: row.get(4)?,
+            scheduled_date: row.get(5)?,
+            end_date: row.get(6)?,
+            status: row.get(7)?,
+            created_at: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            should_count: row.get(11)?,
+            count_value: row.get(12)?,
+            active_session,
+            pomodoro_sessions,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    Ok(task)
+}
+
 fn main() {
     println!("Iniciando aplicação ClockWise...");
 
@@ -1285,14 +1646,30 @@ fn main() {
         false
     };
 
-    let conn = init_database().expect("Failed to initialize database");
+    let db = init_database().expect("Failed to initialize database");
     let db_state = DatabaseState {
-        connection: Arc::new(Mutex::new(conn)),
+        connection: Arc::new(Mutex::new(db)),
     };
 
     tauri::Builder::default()
         .manage(db_state)
         .invoke_handler(tauri::generate_handler![
+            load_tasks,
+            add_task,
+            start_task,
+            complete_task,
+            pause_task,
+            resume_task,
+            delete_task,
+            update_task,
+            get_task_remaining_time,
+            get_task_total_worked_time,
+            get_task_by_id,
+            increment_task_count,
+            reschedule_tasks,
+            get_today_tasks,
+            check_pomodoro_sessions,
+            load_tasks_with_sessions,
             toggle_collapse,
             get_collapsed_state,
             test_hotkey_manually,
@@ -1300,20 +1677,8 @@ fn main() {
             set_system_volume,
             get_system_mute_status,
             toggle_system_mute,
-            load_tasks,
-            add_task,
-            start_task,
-            pause_task,
-            resume_task,
-            complete_task,
-            delete_task,
-            get_task_remaining_time,
-            get_today_tasks,
             expand_window_for_modal,
             reset_window_size,
-            check_pomodoro_sessions,
-            load_tasks_with_sessions,
-
         ])
         .setup(move |app| {
             let handle = app.handle();
@@ -1329,6 +1694,40 @@ fn main() {
 
             // Posicionar a janela
             window.set_position(PhysicalPosition::new(-7, -2))?;
+
+                        // Thread para remanejamento automático de tarefas
+            let app_handle = handle.clone();
+            thread::spawn(move || {
+                let mut last_check_day = chrono::Local::now().date_naive();
+
+                loop {
+                    thread::sleep(Duration::from_secs(3600)); // Verificar a cada hora
+
+                    let current_day = chrono::Local::now().date_naive();
+
+                    // Se mudou de dia, executar remanejamento
+                    if current_day != last_check_day {
+                        println!("🌅 Novo dia detectado: {} -> {}", last_check_day, current_day);
+
+                        if let Some(db_state) = app_handle.try_state::<DatabaseState>() {
+                            if let Ok(conn) = db_state.connection.lock() {
+                                match reschedule_incomplete_tasks(&conn) {
+                                    Ok(rescheduled) => {
+                                        if !rescheduled.is_empty() {
+                                            println!("🔄 Remanejamento automático: {} tarefas movidas", rescheduled.len());
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Erro no remanejamento automático: {}", e);
+                                    }
+                                }
+                            }
+                        }
+
+                        last_check_day = current_day;
+                    }
+                }
+            });
 
             // Thread para monitorar mudanças de volume do sistema
             let window_for_volume = window.clone();
@@ -1485,13 +1884,17 @@ mod tests {
             "CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                description TEXT,
                 user TEXT NOT NULL,
                 estimated_hours REAL NOT NULL,
                 scheduled_date TEXT NOT NULL,
+                end_date TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
                 started_at TEXT,
-                completed_at TEXT
+                completed_at TEXT,
+                should_count BOOLEAN NOT NULL,
+                count_value INTEGER
             )",
             [],
         )?;
@@ -1563,9 +1966,13 @@ mod tests {
 
         let task = add_task(
             "Teste".to_string(),
+            Some("Descrição do teste".to_string()),
             "Usuário".to_string(),
             2.0,
             "2024-03-14".to_string(),
+            Some("2024-03-15".to_string()),
+            true,
+            100,
             State::new(db_state.clone())
         ).await;
         assert!(task.is_ok(), "Deveria criar tarefa com sucesso");
@@ -1581,9 +1988,13 @@ mod tests {
         // Verificar se apenas uma tarefa pode estar ativa
         let another_task = add_task(
             "Outra".to_string(),
+            Some("Descrição da outra tarefa".to_string()),
             "Usuário".to_string(),
             1.0,
             "2024-03-14".to_string(),
+            None,
+            false,
+            0,
             State::new(db_state.clone())
         ).await.unwrap();
 
@@ -1627,18 +2038,26 @@ mod tests {
         // Tarefa de hoje
         add_task(
             "Hoje".to_string(),
+            Some("Tarefa de hoje".to_string()),
             "Usuário".to_string(),
             1.0,
             today.clone(),
+            None,
+            true,
+            50,
             State::new(db_state.clone())
         ).await.unwrap();
 
         // Tarefa de ontem
         add_task(
             "Ontem".to_string(),
+            Some("Tarefa de ontem".to_string()),
             "Usuário".to_string(),
             1.0,
             yesterday,
+            None,
+            false,
+            0,
             State::new(db_state.clone())
         ).await.unwrap();
 

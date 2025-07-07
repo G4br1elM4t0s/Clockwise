@@ -49,7 +49,7 @@ function App() {
 
   return (
     <div className="fixed top-0 left-0 right-0 ">
-      <TaskFooter onAddClick={handleOpenModal} buttonRef={buttonRef} />
+      <TaskFooter onAddClick={handleOpenModal} buttonRef={buttonRef} isModalOpen={isModalOpen} />
       <TaskModal isOpen={isModalOpen} onClose={handleCloseModal} anchorEl={buttonRef} />
     </div>
   )

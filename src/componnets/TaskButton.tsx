@@ -494,6 +494,7 @@ export function TaskButton({ task, onDragAction }: TaskButtonProps) {
         }}
         anchorEl={settingsButtonRef}
         task={task}
+        displayedWorkedTime={formatTimeDisplay(timeRemaining)}
       />
     </>
   )

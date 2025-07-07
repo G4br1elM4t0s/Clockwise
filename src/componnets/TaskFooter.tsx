@@ -1,7 +1,7 @@
 import { useTaskStore } from "../store/task.store"
 import { useState, useEffect, useMemo } from "react"
 import type { RefObject } from "react"
-import { Clock, Plus, List } from "lucide-react"
+import {  List } from "lucide-react"
 // import { VolumeSlider } from "./VolumeSlider"
 import { TaskButton } from "./TaskButton"
 import Calendar from "./Calendar"
@@ -11,12 +11,16 @@ import { invoke } from "@tauri-apps/api/core"
 import { CalendarIcon } from "../components/CalendarIcon"
 import { CalendarStartIcon } from "../components/CalendarStartIcon"
 
+import { CirclePlusIcon } from "../components/CirclePlusIcon"
+import { PlusSuccessIcon } from "../components/PlusSuccessIcon"
+
 interface TaskFooterProps {
   onAddClick: () => void
   buttonRef: RefObject<HTMLButtonElement | null>
+  isModalOpen?: boolean
 }
 
-export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
+export function TaskFooter({ onAddClick, buttonRef, isModalOpen = false }: TaskFooterProps) {
   const {
     getTodayActiveTasks,
     getTodayActiveTasksWithSessions,
@@ -185,10 +189,14 @@ export function TaskFooter({ onAddClick, buttonRef }: TaskFooterProps) {
           <button
             ref={buttonRef}
             onClick={onAddClick}
-            className="flex items-center cursor-pointer border border-white rounded-full gap-2 text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors p-2"
+            className="flex items-center cursor-pointer  rounded-full gap-2 text-sm font-medium text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors p-2"
             title="Adicionar nova tarefa"
           >
-            <Plus className="w-4 h-4" />
+            {isModalOpen ? (
+              <PlusSuccessIcon className="w-6 h-6 text-[#17FF8B]" />
+            ) : (
+              <CirclePlusIcon className="w-6 h-6" />
+            )}
           </button>
 
           {/* Volume Control with Slider */}

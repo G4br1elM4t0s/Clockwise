@@ -4,7 +4,7 @@ import { useTaskStore } from "../store/task.store"
 import type { Task } from "../store/task.store"
 import { invoke } from "@tauri-apps/api/core"
 import { Check, X } from "lucide-react"
-import TimeInput from "./TimeInput"
+import { TimeInput } from "./TimeInput"
 import DateInput from "./DateInput"
 import { CustomCheckbox } from '../components/CustomCheckbox'
 
@@ -54,7 +54,7 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
 
       const task: Task = {
         name: taskName.trim(),
-        description: description.trim(),
+        description: description.trim() || undefined,
         user: "Gabriel",
         estimated_hours: totalHours,
         scheduled_date: startDate.toISOString().split("T")[0],
@@ -62,7 +62,9 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
         status: "pending" as const,
         created_at: new Date().toISOString(),
         started_at: null,
-        completed_at: null
+        completed_at: null,
+        should_count: shouldCount,
+        count_value: 0
       }
 
       await addTask(task)
@@ -87,26 +89,39 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
     }
   }
 
-  const calculateTotalTime = useMemo(() => {
+    const calculateTotalTime = useMemo(() => {
     if (indefiniteEnd) return null;
 
-    // Calcula diferença em dias
-    const diffInDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+    try {
+      // Normalizar as datas para comparação (zerar horas, minutos, segundos)
+      const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
 
-    // Converte o timeInput (HH:mm:ss) em segundos
-    const [hours, minutes, seconds] = timeInput.split(':').map(Number);
-    const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
+      // Calcular diferença em dias (sempre >= 0)
+      const diffInDays = Math.max(0, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
 
-    // Adiciona os dias convertidos em segundos
-    const totalSecondsWithDays = totalSeconds + (diffInDays * 24 * 3600);
+      // Converte o timeInput (HH:mm:ss) em segundos
+      const [hours, minutes, seconds] = timeInput.split(':').map(Number);
+      const totalSeconds = (hours * 3600) + (minutes * 60) + seconds;
 
-    // Converte para o formato desejado
-    const d = Math.floor(totalSecondsWithDays / (3600 * 24));
-    const h = Math.floor((totalSecondsWithDays % (3600 * 24)) / 3600);
-    const m = Math.floor((totalSecondsWithDays % 3600) / 60);
-    const s = totalSecondsWithDays % 60;
+      // Adiciona os dias convertidos em segundos
+      const totalSecondsWithDays = totalSeconds + (diffInDays * 24 * 3600);
 
-    return `${String(d).padStart(2, '0')}d${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
+      // Converte para o formato desejado
+      const d = Math.floor(totalSecondsWithDays / (3600 * 24));
+      const h = Math.floor((totalSecondsWithDays % (3600 * 24)) / 3600);
+      const m = Math.floor((totalSecondsWithDays % 3600) / 60);
+      const s = totalSecondsWithDays % 60;
+
+      const result = `${String(d).padStart(2, '0')}d${String(h).padStart(2, '0')}h${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
+
+
+
+      return result;
+    } catch (error) {
+      console.error('❌ Erro ao calcular tempo total:', error);
+      return null;
+    }
   }, [startDate, endDate, indefiniteEnd, timeInput]);
 
   if (!isOpen) return null
@@ -122,7 +137,7 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
     >
       <div
         onClick={e => e.stopPropagation()}
-        className="w-full max-w-lg bg-[#1A1A1A] rounded-lg p-6 relative"
+        className="w-full max-w-lg  rounded-lg p-6 relative"
       >
         <button
           onClick={e => {
@@ -151,7 +166,7 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
               value={taskName}
               onChange={e => setTaskName(e.target.value)}
               placeholder="Nome da Tarefa"
-              className="w-full px-4 py-2 bg-zinc-700/50 rounded-lg text-white placeholder:pl-2 focus:outline-none text-base"
+              className="w-full px-4 py-2 bg-[#D9D9D9] rounded-lg text-[#181818] placeholder:text-[#181818] placeholder:font-medium placeholder:pl-2 focus:outline-none text-base"
               autoFocus
               required
             />
@@ -163,7 +178,7 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder="Descrição"
-              className="w-full px-4 py-3 bg-zinc-700/50 rounded-lg text-white focus:outline-none min-h-[100px] resize-none text-base"
+              className="w-full px-4 py-3 bg-[#D9D9D9] rounded-lg text-[#181818] placeholder:font-medium placeholder:text-[#181818] focus:outline-none min-h-[100px] resize-none text-base"
             />
           </div>
 
@@ -183,8 +198,8 @@ export function TaskModal({ isOpen, onClose, anchorEl }: TaskModalProps) {
             <div className="flex items-center h-16 gap-2 justify-between w-full">
               {/* Campo Data final */}
               <div className="flex flex-col gap-2 w-3/6">
-                <label className="text-white/70 text-sm">Data final</label>
-                {!indefiniteEnd && <DateInput value={endDate} onChange={setEndDate} />}
+              {!indefiniteEnd && <><label className="text-white/70 text-sm">Data final</label>
+                <DateInput value={endDate} onChange={setEndDate} /> </>}
               </div>
 
               {/* Checkbox Contabilizar */}

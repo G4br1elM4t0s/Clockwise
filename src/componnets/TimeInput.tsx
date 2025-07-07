@@ -1,13 +1,13 @@
 import { ClockIcon } from "../components/ClockIcon"
 
-interface TimeInputProps {
+export interface TimeInputProps {
   value: string
   onChange: (value: string) => void
+  disabled?: boolean
+  className?: string
 }
 
-
-
-export default function TimeInput({ value, onChange }: TimeInputProps) {
+export function TimeInput({ value, onChange, disabled, className }: TimeInputProps) {
   const formatOnBlur = (raw: string): string => {
     // Remove tudo que não for número
     const digits = raw.replace(/\D/g, "").padStart(6, "0").slice(-6)
@@ -20,6 +20,7 @@ export default function TimeInput({ value, onChange }: TimeInputProps) {
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return
     const value = e.target.value
 
     // Permitir apenas números e `:`
@@ -58,8 +59,9 @@ export default function TimeInput({ value, onChange }: TimeInputProps) {
       onChange={handleChange}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
-      className="w-full h-7 pl-6 pr-4 bg-[#D9D9D9] rounded-full text-[#181818] text-center text-sm font-medium focus:outline-none"
+      className={`w-full h-7 pl-6 pr-4 bg-[#D9D9D9] rounded-full text-[#181818] text-center text-sm font-medium focus:outline-none ${className || ''} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
       placeholder="00:00:00"
+      disabled={disabled}
     />
     </div>
   )
